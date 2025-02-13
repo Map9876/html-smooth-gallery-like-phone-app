@@ -319,3 +319,312 @@ ant design html相册。图片相册会自然缩放，由3个每行变成二个�
 
 https://github.com/copilot/c/eb053817-aec3-4c4d-b3f4-252f1f13737b
 
+
+202502131513更新纯html js css版本
+
+```
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>平滑缩放相册</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        .gallery-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 4px;
+            height: 100vh;
+            touch-action: none;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .gallery-grid {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transform-origin: var(--scale-origin-x, 50%) var(--scale-origin-y, 50%);
+            will-change: transform;
+        }
+
+        .gallery-grid.animating {
+            transition: transform 0.6s cubic-bezier(0.33, 1, 0.68, 1);
+        }
+
+        .image-card {
+            position: absolute;
+            overflow: hidden;
+            background: #f0f0f0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: transform, width, height;
+        }
+
+        .image-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .image-wrapper img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .zoom-indicator {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 16px;
+            font-size: 16px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+
+        .zoom-indicator.visible {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="gallery-container">
+        <div class="gallery-grid">
+            <!-- Images will be inserted here -->
+        </div>
+        <div class="zoom-indicator">放大以减少列数</div>
+    </div>
+
+    <script>
+        class Gallery {
+            constructor() {
+                this.container = document.querySelector('.gallery-container');
+                this.grid = document.querySelector('.gallery-grid');
+                this.indicator = document.querySelector('.zoom-indicator');
+                
+                this.columns = 3;
+                this.images = [];
+                this.containerWidth = 0;
+                this.isAnimating = false;
+                
+                this.touchStart = {
+                    distance: 0,
+                    columns: 3,
+                    centerPoint: null,
+                    scale: 1,
+                    focusedIndex: 0
+                };
+
+                this.init();
+            }
+
+            async init() {
+                await this.loadImages();
+                this.updateContainerWidth();
+                this.layoutImages();
+                this.bindEvents();
+            }
+
+            async loadImages() {
+                const imageUrls = Array(21).fill().map((_, i) => `https://picsum.photos/800/800?random=${i + 1}`);
+                this.images = imageUrls.map(url => {
+                    const img = new Image();
+                    img.src = url;
+                    return { url, element: img };
+                });
+                this.renderImages();
+            }
+
+            renderImages() {
+                this.grid.innerHTML = '';
+                this.images.forEach((image, index) => {
+                    const card = document.createElement('div');
+                    card.className = 'image-card';
+                    card.innerHTML = `
+                        <div class="image-wrapper">
+                            <img src="${image.url}" alt="图片 ${index + 1}">
+                        </div>
+                    `;
+                    this.grid.appendChild(card);
+                });
+            }
+
+            updateContainerWidth() {
+                this.containerWidth = this.container.offsetWidth;
+            }
+
+            layoutImages() {
+                const gap = 2;
+                const itemWidth = (this.containerWidth - (gap * (this.columns - 1))) / this.columns;
+                const cards = this.grid.querySelectorAll('.image-card');
+
+                cards.forEach((card, index) => {
+                    const column = index % this.columns;
+                    const row = Math.floor(index / this.columns);
+                    const x = column * (itemWidth + gap);
+                    const y = row * (itemWidth + gap);
+
+                    card.style.width = `${itemWidth}px`;
+                    card.style.height = `${itemWidth}px`;
+                    card.style.transform = `translate(${x}px, ${y}px)`;
+                });
+
+                const totalRows = Math.ceil(this.images.length / this.columns);
+                this.grid.style.height = `${totalRows * (itemWidth + gap)}px`;
+            }
+
+            findFocusedImage(centerPoint) {
+                const cards = Array.from(this.grid.querySelectorAll('.image-card'));
+                let nearestIndex = 0;
+                let minDistance = Infinity;
+
+                cards.forEach((card, index) => {
+                    const rect = card.getBoundingClientRect();
+                    const cardCenterX = rect.left + rect.width / 2;
+                    const cardCenterY = rect.top + rect.height / 2 + this.container.scrollTop;
+                    
+                    const distance = Math.hypot(
+                        centerPoint.x - cardCenterX,
+                        centerPoint.y - cardCenterY
+                    );
+
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        nearestIndex = index;
+                    }
+                });
+
+                return nearestIndex;
+            }
+
+            scrollToImage(index, smooth = true) {
+                const itemWidth = this.containerWidth / this.columns;
+                const row = Math.floor(index / this.columns);
+                const scrollTarget = row * itemWidth;
+                const viewportHeight = this.container.clientHeight;
+                const targetScrollTop = scrollTarget - (viewportHeight / 2) + (itemWidth / 2);
+
+                this.container.scrollTo({
+                    top: Math.max(0, targetScrollTop),
+                    behavior: smooth ? 'smooth' : 'auto'
+                });
+            }
+
+            handleTouchStart(e) {
+                if (e.touches.length === 2) {
+                    const touch1 = e.touches[0];
+                    const touch2 = e.touches[1];
+                    
+                    const centerX = (touch1.clientX + touch2.clientX) / 2;
+                    const centerY = (touch1.clientY + touch2.clientY) / 2;
+                    
+                    this.touchStart = {
+                        distance: Math.hypot(
+                            touch1.clientX - touch2.clientX,
+                            touch1.clientY - touch2.clientY
+                        ),
+                        columns: this.columns,
+                        centerPoint: { x: centerX, y: centerY },
+                        scale: 1,
+                        focusedIndex: this.findFocusedImage({ x: centerX, y: centerY })
+                    };
+
+                    this.grid.style.setProperty('--scale-origin-x', `${centerX}px`);
+                    this.grid.style.setProperty('--scale-origin-y', `${centerY}px`);
+                }
+            }
+
+            handleTouchMove(e) {
+                if (e.touches.length === 2 && !this.isAnimating) {
+                    e.preventDefault();
+                    const touch1 = e.touches[0];
+                    const touch2 = e.touches[1];
+                    
+                    const currentDistance = Math.hypot(
+                        touch1.clientX - touch2.clientX,
+                        touch1.clientY - touch2.clientY
+                    );
+                    
+                    const scale = currentDistance / this.touchStart.distance;
+                    this.touchStart.scale = scale;
+                    
+                    this.grid.style.transform = `scale(${scale})`;
+                    this.indicator.classList.add('visible');
+                    
+                    if (scale < 0.85 && this.columns < 7) {
+                        this.indicator.textContent = '缩小以增加列数';
+                        if (scale < 0.8) {
+                            this.changeColumns(this.columns + 1);
+                        }
+                    } else if (scale > 1.15 && this.columns > 1) {
+                        this.indicator.textContent = '放大以减少列数';
+                        if (scale > 1.2) {
+                            this.changeColumns(this.columns - 1);
+                        }
+                    }
+                }
+            }
+
+            handleTouchEnd() {
+                if (this.isAnimating) return;
+
+                this.isAnimating = true;
+                this.grid.classList.add('animating');
+                this.grid.style.transform = 'scale(1)';
+
+                setTimeout(() => {
+                    this.grid.classList.remove('animating');
+                    this.isAnimating = false;
+                }, 600);
+
+                this.indicator.classList.remove('visible');
+            }
+
+            changeColumns(newColumns) {
+                if (newColumns < 1 || newColumns > 7) return;
+                
+                const focusedIndex = this.touchStart.focusedIndex;
+                this.columns = newColumns;
+                this.isAnimating = true;
+                
+                requestAnimationFrame(() => {
+                    this.layoutImages();
+                    this.scrollToImage(focusedIndex);
+                    
+                    setTimeout(() => {
+                        this.isAnimating = false;
+                    }, 600);
+                });
+            }
+
+            bindEvents() {
+                window.addEventListener('resize', () => {
+                    this.updateContainerWidth();
+                    this.layoutImages();
+                });
+
+                this.grid.addEventListener('touchstart', (e) => this.handleTouchStart(e));
+                this.grid.addEventListener('touchmove', (e) => this.handleTouchMove(e));
+                this.grid.addEventListener('touchend', () => this.handleTouchEnd());
+            }
+        }
+
+        // 初始化相册
+        document.addEventListener('DOMContentLoaded', () => {
+            new Gallery();
+        });
+    </script>
+</body>
+</html>
+```
